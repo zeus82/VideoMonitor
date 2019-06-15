@@ -23,13 +23,20 @@ namespace VideoMonitor
             return Path.Combine(folder, Path.ChangeExtension(file, ".mp4"));
         }
 
+        public static string GetTempFileName(string sourceFile)
+        {
+            var folder = Path.GetDirectoryName(sourceFile);
+            var file = Path.GetFileName(sourceFile).Replace('_', ' ');
+            return Path.Combine(folder, Path.ChangeExtension(file, ".tmp"));
+        }
+
         public static bool Run(string presetFile, string sourceFile)
         {
             var sb = new StringBuilder();
             sb.AppendFormat("--preset-import-file \"{0}\" ", presetFile);
             sb.Append("-f av_mp4 ");
             sb.AppendFormat("-i \"{0}\" ", sourceFile);
-            sb.AppendFormat("-o \"{0}\" ", GetNewFileName(sourceFile));
+            sb.AppendFormat("-o \"{0}\" ", GetTempFileName(sourceFile));
 
             _logger.Info("Launching handbrake with parameters {0}", sb.ToString());
 
@@ -48,18 +55,26 @@ namespace VideoMonitor
                 var output = new StringBuilder();
                 var error = new StringBuilder();
 
-                p.OutputDataReceived += (sender, eventArgs) => output.AppendLine(eventArgs.Data);
+                p.OutputDataReceived += (sender, eventArgs) =>
+                {
+                    Console.Write("\r{0}", eventArgs.Data);
+                    output.AppendLine(eventArgs.Data);
+                };
                 p.ErrorDataReceived += (sender, eventArgs) => error.AppendLine(eventArgs.Data);
 
-                p.Start();
                 p.BeginOutputReadLine();
                 p.BeginErrorReadLine();
 
                 p.WaitForExit();
 
                 _logger.Info("Finished processing {0}, with status {1}", sourceFile, p.ExitCode);
-                if(p.ExitCode != 0)
+                if (p.ExitCode != 0)
+                {
+                    File.Delete(GetTempFileName(sourceFile));
                     _logger.Warn(error);
+                }
+                else
+                    File.Move(GetTempFileName(sourceFile), GetNewFileName(sourceFile));
 
                 return p.ExitCode == 0;
             }

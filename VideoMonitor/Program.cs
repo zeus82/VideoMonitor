@@ -17,75 +17,94 @@ namespace VideoMonitor
         static readonly List<FileSystemWatcher> _watchers = new List<FileSystemWatcher>();
         static readonly BlockingCollection<string> _fileQueue = new BlockingCollection<string>();
         static string _preset;
-        static readonly List<string> _roots = new List<string>();        
+        static readonly List<string> _roots = new List<string>();
+        static readonly List<string> _exclusions = new List<string>();
         static readonly List<string> _fileInFlight = new List<string>();
 
         static void Main(string[] args)
         {
-            _logger.Info("Staring up");
-
-            var config = new ConfigurationBuilder()
-               .AddJsonFile("appsettings.json", false, false)
-               .AddEnvironmentVariables()
-               .Build();
-
-            _logger.Info("Staring monitor thread");
-            Task.Factory.StartNew(() => ProcessNewFiles());
-
-            var timer = TimeSpan.Parse(config.GetSection("OldFileCheckInterval").Value);
-
-            _logger.Info("Scanning for old files every {0}", timer);
-
-            var aTimer = new System.Timers.Timer(timer.TotalMilliseconds);
-            // Hook up the Elapsed event for the timer. 
-            aTimer.Elapsed += OnTimedEvent;
-            aTimer.AutoReset = true;
-            aTimer.Enabled = true;
-
-            _roots.AddRange(config.GetSection("FoldersToScan").GetChildren().Select(a => a.Value));
-            _preset = config.GetSection("presetFile").Value;
-
-            foreach (var r in _roots)
+            try
             {
-                _logger.Info("Monitoring {0}", r);
-                var watcher = new FileSystemWatcher(r);
-                watcher.IncludeSubdirectories = true;
-                watcher.NotifyFilter =
-                    NotifyFilters.LastAccess |
-                    NotifyFilters.LastWrite |
-                    NotifyFilters.FileName |
-                    NotifyFilters.DirectoryName |
-                    NotifyFilters.CreationTime;
+                _logger.Info("Starting up");
 
-                watcher.Filter = "*.*";
+                var config = new ConfigurationBuilder()
+                   .AddJsonFile("appsettings.json", false, false)
+                   .AddEnvironmentVariables()
+                   .Build();
 
-                watcher.Created += OnFileCreated;
+                _logger.Info("Staring monitor thread");
+                Task.Factory.StartNew(() => ProcessNewFiles());
 
-                // Begin watching.
-                watcher.EnableRaisingEvents = true;
-                _watchers.Add(watcher);
+                var timer = TimeSpan.Parse(config.GetSection("OldFileCheckInterval").Value);
+
+                _logger.Info("Scanning for old files every {0}", timer);
+
+                var aTimer = new System.Timers.Timer(timer.TotalMilliseconds);
+                // Hook up the Elapsed event for the timer. 
+                aTimer.Elapsed += OnTimedEvent;
+                aTimer.AutoReset = true;
+                aTimer.Enabled = true;
+
+                _roots.AddRange(config.GetSection("FoldersToScan").GetChildren().Select(a => a.Value));
+                _exclusions.AddRange(config.GetSection("Exclusions").GetChildren().Select(a => a.Value));
+                _preset = config.GetSection("presetFile").Value;
+
+                OnTimedEvent(null, null);
+
+                foreach (var r in _roots)
+                {
+                    _logger.Info("Monitoring {0}", r);
+                    var watcher = new FileSystemWatcher(r);
+                    watcher.IncludeSubdirectories = true;
+                    watcher.NotifyFilter =
+                        NotifyFilters.LastAccess |
+                        NotifyFilters.LastWrite |
+                        NotifyFilters.FileName |
+                        NotifyFilters.DirectoryName |
+                        NotifyFilters.CreationTime;
+
+                    watcher.Filter = "*.*";
+
+                    watcher.Created += OnFileCreated;
+
+                    // Begin watching.
+                    watcher.EnableRaisingEvents = true;
+                    _watchers.Add(watcher);
+                }
+
+                while (true)
+                    Thread.Sleep(int.MaxValue);
             }
-
-            while(true)
-                Thread.Sleep(int.MaxValue);
+            catch(Exception ex)
+            {
+                _logger.Fatal(ex, "Fatal Error");
+                throw;
+            }
         }
 
         private static void OnFileCreated(object sender, FileSystemEventArgs e)
         {
             if(Path.GetExtension(e.FullPath).Equals(".mkv", StringComparison.OrdinalIgnoreCase))
             {
-                _fileInFlight.Add(e.FullPath);
-                var fi = new FileInfo(e.FullPath);
-                while (true)
+                var match = _exclusions.FirstOrDefault(a => e.FullPath.Contains(a, StringComparison.OrdinalIgnoreCase));
+
+
+                if (string.IsNullOrWhiteSpace(match))
                 {
-                    if (!IsFileLocked(fi))
+                    var fi = new FileInfo(e.FullPath);
+                    while (true)
                     {
-                        _logger.Debug("Queuing {0}", e.FullPath);
-                        _fileQueue.Add(e.FullPath);
-                        break;
+                        if (!IsFileLocked(fi))
+                        {
+                            _logger.Debug("Queuing {0}", e.FullPath);
+                            QueueFile(e.FullPath);
+                            break;
+                        }
+                        Thread.Sleep(1000);
                     }
-                        
                 }
+                else
+                    _logger.Debug("Skipping file {0} because it matches exclusion \"{1}\"", e.FullPath, match);
             }
         }
 
@@ -141,35 +160,53 @@ namespace VideoMonitor
             foreach(var r in _roots)
                 mkvs.AddRange(Directory.EnumerateFiles(r, "*.mkv", SearchOption.AllDirectories).Select(f => new FileInfo(f)));
 
-            foreach(var f in mkvs.Where(a => !_fileInFlight.Contains(a.FullName)))
+            foreach (var f in mkvs.Where(a => !_fileInFlight.Contains(a.FullName)))
             {
-                if(File.Exists(HandBrakeRunner.GetNewFileName(f.FullName)))
+                var match = _exclusions.FirstOrDefault(a => f.FullName.Contains(a, StringComparison.OrdinalIgnoreCase));
+
+                if (string.IsNullOrEmpty(match))
                 {
-                    _logger.Info("Found mkv and associated mp4.  Deleting mkv {0}", f.FullName);
-                    try
+                    if (File.Exists(HandBrakeRunner.GetNewFileName(f.FullName)))
                     {
-                        if (!IsFileLocked(f))
-                            File.Delete(f.FullName);
-                        else
-                            _logger.Info("{0} is in use", f.FullName);
+                        _logger.Info("Found mkv and associated mp4.  Deleting mkv {0}", f.FullName);
+                        try
+                        {
+                            if (!IsFileLocked(f))
+                                File.Delete(f.FullName);
+                            else
+                                _logger.Info("{0} is in use", f.FullName);
+                        }
+                        catch
+                        {
+                            _logger.Info("Failed to delete {0}", f);
+                        }
                     }
-                    catch
+                    else
                     {
-                        _logger.Info("Failed to delete {0}", f);
+                        if (f.CreationTimeUtc > DateTime.UtcNow - TimeSpan.FromDays(14) && f.CreationTimeUtc < DateTime.UtcNow - TimeSpan.FromDays(1))
+                        {
+                            if (!IsFileLocked(f))
+                            {
+                                _logger.Info("Found mkv without associated mp4.  Queuing mkv {0}", f.FullName);
+                                QueueFile(f.FullName);
+                            }
+                        }
+                        else
+                            _logger.Info("Found old mkv without associated mp4. {0}", f.FullName);
+
                     }
                 }
                 else
-                {
-                    if (f.CreationTimeUtc > DateTime.UtcNow - TimeSpan.FromDays(14))
-                    {
-                        _logger.Info("Found mkv without associated mp4.  Queuing mkv {0}", f.FullName);
-                        _fileQueue.Add(f.FullName);
-                    }
-                    else
-                        _logger.Info("Found old mkv without associated mp4. {0}", f.FullName);
-
-                }
+                    _logger.Debug("Skipping file {0} because it matches exclusion \"{1}\"", f.FullName, match);
             }
+        }
+
+        private static void QueueFile(string f)
+        {
+            _fileInFlight.Add(f);
+            _fileQueue.Add(f);
+            if(_fileQueue.Count > 0)
+                _logger.Debug(string.Join(Environment.NewLine, _fileQueue.Select(a => "\t" + a).ToArray()));
         }
     }
 }
