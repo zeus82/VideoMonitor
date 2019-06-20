@@ -9,6 +9,7 @@ namespace VideoMonitor
     class HandBrakeRunner
     {
         private static readonly NLog.ILogger _logger = NLog.LogManager.GetLogger(nameof(HandBrakeRunner));
+        private static readonly NLog.ILogger _processedLogger = NLog.LogManager.GetLogger("processed");
         private static readonly string HandbrakePath;
 
         static HandBrakeRunner()
@@ -67,7 +68,7 @@ namespace VideoMonitor
 
                 p.WaitForExit();
 
-                _logger.Info("Finished processing {0}, with status {1}", sourceFile, p.ExitCode);
+                _processedLogger.Info("Finished processing {0}, with status {1}", sourceFile, p.ExitCode);
                 if (p.ExitCode != 0)
                 {
                     File.Delete(GetTempFileName(sourceFile));
