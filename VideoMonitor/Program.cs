@@ -80,7 +80,7 @@ namespace VideoMonitor
                 while (true)
                     Thread.Sleep(int.MaxValue);
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 _logger.Fatal(ex, "Fatal Error");
                 throw;
@@ -89,7 +89,7 @@ namespace VideoMonitor
 
         private static void OnFileCreated(object sender, FileSystemEventArgs e)
         {
-            if(Path.GetExtension(e.FullPath).Equals(".mkv", StringComparison.OrdinalIgnoreCase))
+            if (Path.GetExtension(e.FullPath).Equals(".mkv", StringComparison.OrdinalIgnoreCase))
             {
                 var match = _exclusions.FirstOrDefault(a => e.FullPath.Contains(a, StringComparison.OrdinalIgnoreCase));
 
@@ -206,7 +206,7 @@ namespace VideoMonitor
                     }
                     else if (File.Exists(HandBrakeRunner.GetTempFileName(f.FullName)))
                     {
-                        if(!_fileInFlight.Contains(f.FullName))
+                        if (!_fileInFlight.Contains(f.FullName))
                         {
                             foundWork = false;
                             _logger.Info("Found temp file that is not being processed{0}", HandBrakeRunner.GetTempFileName(f.FullName));
@@ -214,7 +214,7 @@ namespace VideoMonitor
                             {
                                 File.Delete(HandBrakeRunner.GetTempFileName(f.FullName));
                             }
-                            catch(Exception ex)
+                            catch (Exception ex)
                             {
                                 _logger.Warn(ex, "Failed to delete temp file {0}", HandBrakeRunner.GetTempFileName(f.FullName));
                             }
@@ -252,12 +252,12 @@ namespace VideoMonitor
 
             foreach (var r in _roots)
             {
-                foreach(var l in Directory.EnumerateFiles(r, "*480p*.mp4", SearchOption.AllDirectories).Select(f => new FileInfo(f)))
+                foreach (var l in Directory.EnumerateFiles(r, "*480p*.mp4", SearchOption.AllDirectories).Select(f => new FileInfo(f)))
                 {
                     var other = Directory.EnumerateFiles(l.DirectoryName, GetNameBeforeRes(l.FullName), SearchOption.TopDirectoryOnly)
                         .FirstOrDefault(a => !a.Contains("480p", StringComparison.OrdinalIgnoreCase));
 
-                    if(!string.IsNullOrWhiteSpace(other))
+                    if (!string.IsNullOrWhiteSpace(other))
                     {
                         foundWork = true;
                         _logger.Info("Found {0}, deleting {1}", other, l.FullName);
@@ -287,27 +287,33 @@ namespace VideoMonitor
         {
             _fileInFlight.Add(f);
             _fileQueue.Add(f);
-            if(_fileQueue.Count > 0)
-                _logger.Debug("Queue is: {0}{1}", Environment.NewLine, 
+            if (_fileQueue.Count > 0)
+                _logger.Debug("Queue is: {0}{1}", Environment.NewLine,
                     string.Join(Environment.NewLine, _fileQueue.Select(a => "\t" + a).ToArray()));
         }
 
         private static string GetNameBeforeRes(string path)
         {
-            var name = Path.GetFileNameWithoutExtension(path);
-
-            var resIdx = name.IndexOf("480p", StringComparison.OrdinalIgnoreCase);
-            if(resIdx < 1)
-                resIdx = name.IndexOf("720p", StringComparison.OrdinalIgnoreCase);
-            if (resIdx < 1)
-                resIdx = name.IndexOf("1080p", StringComparison.OrdinalIgnoreCase);
-
-            if(resIdx > 0)
+            try
             {
-                var spaceidx = name.LastIndexOf(' ', resIdx);
-                return name.Substring(0, spaceidx);
-            }
+                var name = Path.GetFileNameWithoutExtension(path);
 
+                var resIdx = name.IndexOf("480p", StringComparison.OrdinalIgnoreCase);
+                if (resIdx < 1)
+                    resIdx = name.IndexOf("720p", StringComparison.OrdinalIgnoreCase);
+                if (resIdx < 1)
+                    resIdx = name.IndexOf("1080p", StringComparison.OrdinalIgnoreCase);
+
+                if (resIdx > 0)
+                {
+                    var spaceidx = name.LastIndexOf(' ', resIdx);
+                    return name.Substring(0, spaceidx);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "{0} was not in expected format", path);
+            }
             return null;
 
         }
