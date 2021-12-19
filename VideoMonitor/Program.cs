@@ -10,22 +10,21 @@ using System.Timers;
 
 namespace VideoMonitor
 {
-    class Program
+    internal class Program
     {
         private static readonly NLog.ILogger _logger = NLog.LogManager.GetLogger(nameof(Program));
         private static readonly NLog.ILogger _exclusionLogger = NLog.LogManager.GetLogger("exclusion");
         private static readonly NLog.ILogger _deleteLogger = NLog.LogManager.GetLogger("delete");
 
-        static readonly List<FileSystemWatcher> _watchers = new List<FileSystemWatcher>();
-        static readonly BlockingCollection<string> _fileQueue = new BlockingCollection<string>();
-        static string _preset;
-        static readonly List<string> _roots = new List<string>();
-        static readonly List<string> _exclusions = new List<string>();
-        static readonly List<string> _fileInFlight = new List<string>();
-        static readonly List<string> _excludedFiles = new List<string>();
+        private static readonly List<FileSystemWatcher> _watchers = new();
+        private static readonly BlockingCollection<string> _fileQueue = new();
+        private static string _preset;
+        private static readonly List<string> _roots = new();
+        private static readonly List<string> _exclusions = new();
+        private static readonly List<string> _fileInFlight = new();
+        private static readonly List<string> _excludedFiles = new();
 
-
-        static void Main(string[] args)
+        private static void Main()
         {
             try
             {
@@ -59,16 +58,18 @@ namespace VideoMonitor
                 foreach (var r in _roots)
                 {
                     _logger.Info("Monitoring {0}", r);
-                    var watcher = new FileSystemWatcher(r);
-                    watcher.IncludeSubdirectories = true;
-                    watcher.NotifyFilter =
+                    var watcher = new FileSystemWatcher(r)
+                    {
+                        IncludeSubdirectories = true,
+                        NotifyFilter =
                         NotifyFilters.LastAccess |
                         NotifyFilters.LastWrite |
                         NotifyFilters.FileName |
                         NotifyFilters.DirectoryName |
-                        NotifyFilters.CreationTime;
+                        NotifyFilters.CreationTime,
 
-                    watcher.Filter = "*.*";
+                        Filter = "*.*"
+                    };
 
                     watcher.Created += OnFileCreated;
 
@@ -91,8 +92,7 @@ namespace VideoMonitor
         {
             if (Path.GetExtension(e.FullPath).Equals(".mkv", StringComparison.OrdinalIgnoreCase))
             {
-                var match = _exclusions.FirstOrDefault(a => e.FullPath.Contains(a, StringComparison.OrdinalIgnoreCase));
-
+                var match = _exclusions.Find(a => e.FullPath.Contains(a, StringComparison.OrdinalIgnoreCase));
 
                 if (string.IsNullOrWhiteSpace(match))
                 {
@@ -123,7 +123,7 @@ namespace VideoMonitor
             }
         }
 
-        static void ProcessNewFiles()
+        private static void ProcessNewFiles()
         {
             while (true)
             {
@@ -152,13 +152,12 @@ namespace VideoMonitor
             }
         }
 
-        static bool IsFileLocked(FileInfo file)
+        private static bool IsFileLocked(FileInfo file)
         {
             try
             {
-                using (var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.None))
-                {
-                };
+                using var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.None);
+                _logger.Trace("File {0} is not locked", file.FullName);
             }
             catch (IOException)
             {
@@ -171,7 +170,6 @@ namespace VideoMonitor
 
         private static void OnTimedEvent(object source, ElapsedEventArgs e)
         {
-
             var mkvs = new List<FileInfo>();
             var foundWork = false;
             foreach (var r in _roots)
@@ -181,7 +179,7 @@ namespace VideoMonitor
 
             foreach (var f in mkvs.Where(a => !_fileInFlight.Contains(a.FullName)))
             {
-                var match = _exclusions.FirstOrDefault(a => f.FullName.Contains(a, StringComparison.OrdinalIgnoreCase));
+                var match = _exclusions.Find(a => f.FullName.Contains(a, StringComparison.OrdinalIgnoreCase));
 
                 if (string.IsNullOrEmpty(match))
                 {
@@ -197,7 +195,9 @@ namespace VideoMonitor
                                 _deleteLogger.Info("Deleted {0}", f.FullName);
                             }
                             else
+                            {
                                 _logger.Info("{0} is in use", f.FullName);
+                            }
                         }
                         catch
                         {
@@ -234,9 +234,8 @@ namespace VideoMonitor
                         else
                         {
                             foundWork = true;
-                            _logger.Info("Found old mkv without associated mp4. {0}", f.FullName);
+                            _logger.Info("Found old mkv without associated mp4. {0} becuase it is either too old or too new", f.FullName);
                         }
-
                     }
                 }
                 else
@@ -269,7 +268,9 @@ namespace VideoMonitor
                                 _deleteLogger.Info("Deleted {0}", l.FullName);
                             }
                             else
+                            {
                                 _logger.Info("{0} is in use", l.FullName);
+                            }
                         }
                         catch
                         {
@@ -288,8 +289,10 @@ namespace VideoMonitor
             _fileInFlight.Add(f);
             _fileQueue.Add(f);
             if (_fileQueue.Count > 0)
+            {
                 _logger.Debug("Queue is: {0}{1}", Environment.NewLine,
                     string.Join(Environment.NewLine, _fileQueue.Select(a => "\t" + a).ToArray()));
+            }
         }
 
         private static string GetNameBeforeRes(string path)
@@ -307,7 +310,7 @@ namespace VideoMonitor
                 if (resIdx > 0)
                 {
                     var spaceidx = name.LastIndexOf(' ', resIdx);
-                    return name.Substring(0, spaceidx);
+                    return name[..spaceidx];
                 }
             }
             catch (Exception ex)
@@ -315,7 +318,6 @@ namespace VideoMonitor
                 _logger.Error(ex, "{0} was not in expected format", path);
             }
             return null;
-
         }
     }
 }

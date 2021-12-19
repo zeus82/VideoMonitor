@@ -51,34 +51,34 @@ namespace VideoMonitor
                 RedirectStandardError = true
             };
 
-            using (var p = Process.Start(startInfo))
+            using var p = Process.Start(startInfo);
+            var output = new StringBuilder();
+            var error = new StringBuilder();
+
+            p.OutputDataReceived += (sender, eventArgs) =>
             {
-                var output = new StringBuilder();
-                var error = new StringBuilder();
+                Console.Write("\r{0}", eventArgs.Data);
+                output.AppendLine(eventArgs.Data);
+            };
+            p.ErrorDataReceived += (sender, eventArgs) => error.AppendLine(eventArgs.Data);
 
-                p.OutputDataReceived += (sender, eventArgs) =>
-                {
-                    Console.Write("\r{0}", eventArgs.Data);
-                    output.AppendLine(eventArgs.Data);
-                };
-                p.ErrorDataReceived += (sender, eventArgs) => error.AppendLine(eventArgs.Data);
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
 
-                p.BeginOutputReadLine();
-                p.BeginErrorReadLine();
+            p.WaitForExit();
 
-                p.WaitForExit();
-
-                _processedLogger.Info("Finished processing {0}, with status {1}", sourceFile, p.ExitCode);
-                if (p.ExitCode != 0)
-                {
-                    File.Delete(GetTempFileName(sourceFile));
-                    _logger.Warn(error);
-                }
-                else
-                    File.Move(GetTempFileName(sourceFile), GetNewFileName(sourceFile));
-
-                return p.ExitCode == 0;
+            _processedLogger.Info("Finished processing {0}, with status {1}", sourceFile, p.ExitCode);
+            if (p.ExitCode != 0)
+            {
+                File.Delete(GetTempFileName(sourceFile));
+                _logger.Warn(error);
             }
+            else
+            {
+                File.Move(GetTempFileName(sourceFile), GetNewFileName(sourceFile));
+            }
+
+            return p.ExitCode == 0;
         }
     }
 }
